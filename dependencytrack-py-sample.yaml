@@ -1,0 +1,12 @@
+# Config file.
+# The URL of the Dependency-Track API server.
+baseurl: "https://localhost:9443/api/v1"
+
+# Go to Home > Administration > Access Management > Teams > Automation and add a new API KEY
+#   To upload bom and create project you need at least the following
+#   privileges:
+#   BOM_UPLOAD, PORTFOLIO_MANAGEMENT, VIEW_PORTFOLIO
+token: "fsafafafsafasfas"
+
+# If you want to disable TLS verification...
+verify: False
