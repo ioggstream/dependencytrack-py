@@ -1,47 +1,10 @@
 import uuid
 from pathlib import Path
+from time import sleep
 
-import pytest
 import yaml
 
-from dependencytrack import DependencyTrack
-
-
-@pytest.fixture
-def dt():
-    config = yaml.safe_load(Path(".dependencytrack-py.yaml").read_text())
-    return DependencyTrack(**config)
-
-
-@pytest.fixture
-def sample_project(dt):
-    project = {
-        "name": "deleteme",
-        "version": f"{uuid.uuid4()}",
-        "group": "io.github",
-        "purl": "pkg:maven/io.github/dependencytrack-py@0.0.1",
-        "classifier": "APPLICATION",
-        "tags": [{"name": "fake-tag-1"}, {"name": "fake-tag-2"}],
-        "properties": [
-            {
-                "propertyName": "fake-key-1",
-                "propertyValue": "fake-value-1",
-                "propertyType": "STRING",
-                "groupName": "fake-group-1",
-            },
-            {
-                "groupName": "fake-group-1",
-                "propertyName": "fake-key-2",
-                "propertyValue": "fake-value-2",
-                "propertyType": "STRING",
-            },
-        ],
-        "description": "This is a fake project.",
-        "active": True,
-    }
-    project = dt.project.create(entry=project).data
-    yield project
-    dt.project.delete(project["uuid"])
+from dependencytrack import Project
 
 
 def test_project_not_found(dt):
@@ -57,13 +20,13 @@ def test_list_projects(dt):
     assert dt.project.get(project["uuid"])["name"] == project["name"]
 
 
-def test_list_components(dt):
+def test_list_components_by_project(dt):
     uuid = dt.project.list()[0]["uuid"]
     project = dt.project.get(uuid)
 
     # The actual API layout is messy since
     #  it mixes the project and component.
-    components = dt.component.project.get(project["uuid"])
+    components = project.component.list()
     assert len(components)
 
 
@@ -83,10 +46,42 @@ def test_create_project(dt):
     assert dt.project.get(ret["uuid"]) is None
 
 
+def test_add_component_to_project(dt, complex_project):
+    sbom_json = Path("tests/sbom.json")
+
+    # Add BOM.
+    bom_payload = dt.prepare_sbom(sbom=sbom_json, project_uuid=complex_project["uuid"])
+    dt.bom.upload(bom_payload=bom_payload)
+
+    # Wait for BOM to be processed by Dependency-Track.
+    sleep(2)
+    components = complex_project.component.list(fields=["purl"])
+    assert len(components) > 0
+
+    self_component = {
+        "name": complex_project["name"],
+        "version": complex_project["version"],
+        "group": complex_project["group"],
+        "purl": complex_project["purl"],
+        "classifier": complex_project["classifier"],
+    }
+    complex_project.component.create(entry=self_component)
+
+    ret = dt.component.identity.list(purl=complex_project["purl"])
+    assert ret
+    project = ret[0]
+    assert project["purl"] == complex_project["purl"]
+
+
 def test_project_property(dt, sample_project):
     project = dt.project.get(sample_project["uuid"])
     properties = project.property.list()
     assert len(properties) == 2
+
+
+def test_get_all_components(dt, sample_project):
+    ret = dt.component.identity.list(purl="pkg:composer/symfony/var-dumper@5.4.0")
+    assert len(ret) > 0
 
 
 def test_tag(dt):
@@ -107,3 +102,9 @@ def test_sbom_put(dt, sample_project):
     }
     ret = dt.bom.upload(sbom)
     assert "token" in ret
+
+
+def test_project_from_sbom():
+    sbom = yaml.safe_load(Path("tests/sbom.json").read_text())
+    project = Project.from_sbom(sbom)
+    assert project["classifier"] == "APPLICATION"

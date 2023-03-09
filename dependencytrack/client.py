@@ -2,8 +2,11 @@
 A dependencytrack client.
 """
 import base64
+import json
 import logging
+import re
 from pathlib import Path
+from typing import Union
 from urllib.parse import urlencode, urlparse
 
 import requests
@@ -18,7 +21,18 @@ def fields_filter(data, fields=None):
     return data
 
 
+def purl_to_project(purl):
+    if not purl.startswith("pkg:maven/"):
+        raise NotImplementedError("Only maven purls are supported")
+    group_id, project_name, project_version = re.match(
+        r"pkg:maven/([^/]+)/([^@]+)@(.+)", purl
+    ).groups()
+    return group_id, project_name, project_version
+
+
 class DTProxy:
+    preserve_type = False
+
     def __init__(self, client, path, parent=None, data=None):
         self.client = client
         if parent:
@@ -35,7 +49,10 @@ class DTProxy:
             return None
         data = ret.json()
 
-        return DTProxy(
+        clz = DTProxy
+        if "uuid" in data and self.preserve_type:
+            clz = self.__class__
+        return clz(
             client=self.client, path=dpath, data=fields_filter(data, fields=fields)
         )
 
@@ -43,7 +60,7 @@ class DTProxy:
         ret = self.client._invoke_(
             "get", f"{self.path}", qp=kwargs, ignore_status=(404,)
         )
-        log.info(f"Retrieved items from {ret.url} {ret.content}")
+        log.debug(f"Retrieved items from {ret.url} {ret.content}")
         if ret.status_code == 404:
             log.info(f"Could not find {ret.url}")
             return None
@@ -57,7 +74,12 @@ class DTProxy:
             path = f"{self.path}/{uuid}"
         else:
             path = self.path
-        return DTProxy(client=self.client, path=path, data=data)
+
+        clz = DTProxy
+        if "uuid" in data and self.preserve_type:
+            clz = self.__class__
+
+        return clz(client=self.client, path=path, data=data)
 
     def upload(self, bom_payload):
         if not self.path.endswith("bom"):
@@ -114,6 +136,7 @@ class DTProxy:
             "bom",
             "tag",
             "property",
+            "identity",
         ):
             return DTProxy(self.client, name, self.path)
         raise AttributeError(f"DTProxy has no attribute {name}")
@@ -141,7 +164,7 @@ class DependencyTrack:
 
     @property
     def project(self):
-        return DTProxy(self, "project")
+        return Project(self, "project")
 
     @property
     def component(self):
@@ -150,6 +173,10 @@ class DependencyTrack:
     @property
     def bom(self):
         return DTProxy(self, "bom")
+
+    @property
+    def search(self):
+        return DTProxy(self, "search")
 
     def _invoke_(
         self,
@@ -173,23 +200,53 @@ class DependencyTrack:
             raise ValueError(f"{ret.status_code} {ret.content}")
         return ret
 
+    @staticmethod
     def prepare_sbom(
-        self,
-        sbom_path,
+        sbom: Union[Path, dict],
         project_uuid=None,
         project_name=None,
         project_version=None,
         project_metadata=None,
     ):
-        sbom_path if isinstance(sbom_path, Path) else Path(sbom_path)
-        sbom_encoded = base64.b64encode(sbom_path.read_bytes())
-        json = {
+        if isinstance(sbom, dict):
+            sbom_bytes = json.dumps(sbom).encode()
+        elif isinstance(sbom, Path):
+            sbom_bytes = sbom.read_bytes()
+        sbom_encoded = base64.b64encode(sbom_bytes)
+        json_ = {
             "bom": sbom_encoded.decode(),
         }
 
         if project_uuid:
-            json["project"] = project_uuid
+            json_["project"] = project_uuid
         else:
-            json["projectName"] = project_name
-            json["projectVersion"] = project_version
-        return json
+            json_["projectName"] = project_name
+            json_["projectVersion"] = project_version
+        return json_
+
+
+class Project(DTProxy):
+    preserve_type = True
+
+    @property
+    def component(self):
+        component_proxy = DTProxy(self.client, f"component/project/{self.uuid}")
+        return component_proxy
+
+    @staticmethod
+    def from_sbom(sbom: dict):
+        artifact = sbom["metadata"]["component"]
+        ret = {
+            "name": artifact["name"],
+            "version": artifact["version"],
+            "purl": artifact["purl"],
+            "classifier": artifact["type"].upper(),
+        }
+        for sbom_prop, project_prop in [
+            ("description", "description"),
+            ("group", "group"),
+        ]:
+            if not artifact.get(sbom_prop):
+                continue
+            ret[project_prop] = artifact[sbom_prop]
+        return ret

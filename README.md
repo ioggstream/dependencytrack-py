@@ -40,14 +40,20 @@ bom_payload = client.prepare_bom(
 )
 client.bom.upload(bom_payload)
 
-# Get all components
-components = client.component.project.get(a_project["uuid"])
+# Get all components for a project, using
+# the Project object.
+components = project.components.list()
+
+# Get all components for a project, using
+# the DTProxy object.
+components = client.component.project.get(project["uuid"])
+
 assert len(components) > 0
 component = components[0]
 print(component)
 ```
 
-See [tests](tests/test_report_pandas.py) for a more complete example
+See [examples](examples/report.py) for a more complete example
 of creating reports using this library.
 
 ## Contributing
