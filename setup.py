@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="dependencytrack-py",
-    version="0.0.2",
+    version="0.0.3",
     author="Roberto Polli",
     author_email="robipolli@gmail.com",
     description="A simple wrapper for the Dependency Track REST API.",

@@ -123,3 +123,8 @@ def test_project_from_sbom():
     sbom = yaml.safe_load(Path("tests/sbom.json").read_text())
     project = Project.from_sbom(sbom)
     assert project["classifier"] == "APPLICATION"
+
+
+def test_services(dt_client, complex_project, complex_project_service):
+    services = complex_project.service.list()
+    assert len(services) > 0

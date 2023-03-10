@@ -119,11 +119,6 @@ class DTProxy:
             )
         return None
 
-    def lookup(self, *args, **kwargs):
-        """Lookup a single project by name or uuid."""
-        ret = self.client._invoke_("get", f"{self.path}/lookup", *args, **kwargs)
-        return ret.json()
-
     def __getitem__(self, key):
         return self.data[key]
 
@@ -186,6 +181,10 @@ class DependencyTrack:
     @property
     def search(self):
         return DTProxy(self, "search")
+
+    @property
+    def service(self):
+        return DTProxy(self, "service")
 
     def _invoke_(
         self,
@@ -256,8 +255,20 @@ class Project(DTProxy):
 
     @property
     def component(self):
-        component_proxy = DTProxy(self.client, f"component/project/{self.uuid}")
-        return component_proxy
+        return DTProxy(self.client, f"component/project/{self.uuid}")
+
+    @property
+    def service(self):
+        return DTProxy(self.client, f"service/project/{self.uuid}")
+
+    def lookup(self, *args, **kwargs):
+        """Lookup a single project by name or uuid."""
+        ret = self.client._invoke_("get", f"{self.path}/lookup", *args, **kwargs)
+        data = ret.json()
+        if uuid := data.get("uuid"):
+            dpath = f"{self.path}/{uuid}"
+            return Project(client=self.client, path=dpath, data=data)
+        raise RuntimeError(f"Error retrieving project {kwargs}")
 
     @staticmethod
     def from_sbom(sbom: dict):

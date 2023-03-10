@@ -122,6 +122,16 @@ def yield_project_dependencies(
                     traversed=traversed,
                     internal_groups=internal_groups,
                 )
+    for service in project.service.list(fields=["name", "group", "version", "uuid"]):
+        dependency_url = f"{service['group']}:{service['name']}@{service['version']}"
+
+        if dependency_url in traversed:
+            continue
+        traversed.add(dependency_url)
+        yield {
+            "dependency_url": dependency_url,
+            "dependency_classifier": "service",
+        }
 
 
 def get_all_project_dependencies(client: dt.DependencyTrack, **kwargs):

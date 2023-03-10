@@ -32,6 +32,22 @@ def complex_project(dt_client):
 
 
 @pytest.fixture
+def complex_project_service(dt_client, complex_project):
+    service = {
+        "name": "service-deleteme",
+        "version": f"{uuid.uuid4()}",
+        "group": "io.github",
+        "endpoints": ["https://www.github.com/ioggstream/dependencytrack-py"],
+    }
+    dt_service = complex_project.service.create(entry=service)
+    yield dt_service
+
+    dt_client.service.delete(dt_service["uuid"])
+    with pytest.raises(dt.exc.NotFound):
+        dt_client.service.get(dt_service["uuid"])
+
+
+@pytest.fixture
 def sample_project(dt_client):
     project = {
         "name": "deleteme",
