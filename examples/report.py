@@ -24,7 +24,8 @@ log = logging.getLogger(__name__)
 @click.option(
     "--config-file",
     "-c",
-    help="Path to config file",
+    required=True,
+    help="Path to dependencytrack config file",
     type=click.Path(exists=True, dir_okay=False, resolve_path=True),
 )
 @click.option("--vcs-domain", "-v", help="Git servers to track.", default="")
@@ -38,7 +39,15 @@ log = logging.getLogger(__name__)
 )
 @click.option("-o", "--output-file", required=True, help="Output file")
 @click.option("-f", "--filter", default="", help="Filter project names")
-def main(config_file, output_file, internal_groups, vcs_domain, filter):
+@click.option(
+    "--add-self-dependency",
+    is_flag=True,
+    default=False,
+    help="Add to every project a component referencing the project purl.",
+)
+def main(
+    config_file, output_file, internal_groups, vcs_domain, filter, add_self_dependency
+):
     config = Path(config_file).expanduser().read_text()
     config = yaml.safe_load(config)
     client = dt.DependencyTrack(**config)
@@ -49,6 +58,7 @@ def main(config_file, output_file, internal_groups, vcs_domain, filter):
             filter=filter,
             internal_groups=internal_groups,
             vcs_domain=vcs_domain,
+            add_self_dependency=add_self_dependency,
         )
     )
     df.to_csv(output_file)
@@ -85,7 +95,7 @@ def yield_project_dependencies(
 ):
     client = project.client
 
-    dependencies = project.component.list(fields=["purl", "name", "classifier"])
+    dependencies = project.component.list(fields=["purl", "name", "classifier", "uuid"])
     for dependency in dependencies:
         dependency_url = dependency.get("purl") or dependency.get("name")
 
@@ -115,6 +125,7 @@ def yield_project_dependencies(
 
 
 def get_all_project_dependencies(client: dt.DependencyTrack, **kwargs):
+    add_self_dependency = kwargs.pop("add_self_dependency")
     if filter_ := kwargs.pop("filter"):
         filter_ = {"searchText": filter_}
     else:
@@ -136,7 +147,7 @@ def get_all_project_dependencies(client: dt.DependencyTrack, **kwargs):
     for project in projects:
         project = client.project.get(project["uuid"])
 
-        if project.data.get("purl"):
+        if project.data.get("purl") and add_self_dependency:
             # Add a self-indexing component to the project.
             has_self_component = [
                 component
@@ -150,6 +161,7 @@ def get_all_project_dependencies(client: dt.DependencyTrack, **kwargs):
                     "group": project["group"],
                     "purl": project["purl"],
                     "classifier": project["classifier"],
+                    "author": "Self-dependency added by report.py",
                 }
 
                 project.component.create(entry=self_component)

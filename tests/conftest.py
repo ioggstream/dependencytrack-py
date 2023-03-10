@@ -4,33 +4,35 @@ from pathlib import Path
 import pytest
 import yaml
 
+import dependencytrack as dt
 from dependencytrack import DependencyTrack, Project
 
 
 @pytest.fixture
-def dt():
+def dt_client():
     config = Path("~/.dependencytrack-py-test.yaml").expanduser().read_text()
     config = yaml.safe_load(config)
     return DependencyTrack(**config)
 
 
 @pytest.fixture
-def complex_project(dt):
+def complex_project(dt_client):
     sbom_json = Path("tests/sbom.json")
     sbom = yaml.safe_load(sbom_json.read_text())
     project = Project.from_sbom(sbom)
     project["name"] = f"deleteme-{uuid.uuid4()}"
-    ret = dt.project.create(entry=project)
+    ret = dt_client.project.create(entry=project)
     assert "uuid" in ret
 
     yield ret
 
-    dt.project.get(ret["uuid"]).delete()
-    assert dt.project.get(ret["uuid"]) is None
+    dt_client.project.get(ret["uuid"]).delete()
+    with pytest.raises(dt.exc.NotFound):
+        dt_client.project.get(ret["uuid"])
 
 
 @pytest.fixture
-def sample_project(dt):
+def sample_project(dt_client):
     project = {
         "name": "deleteme",
         "version": f"{uuid.uuid4()}",
@@ -55,7 +57,7 @@ def sample_project(dt):
         "description": "This is a fake project.",
         "active": True,
     }
-    project = dt.project.create(entry=project).data
-    dt.component.project
+    project = dt_client.project.create(entry=project).data
+    dt_client.component.project
     yield project
-    dt.project.delete(project["uuid"])
+    dt_client.project.delete(project["uuid"])

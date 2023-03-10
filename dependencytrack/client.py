@@ -11,6 +11,8 @@ from urllib.parse import urlencode, urlparse
 
 import requests
 
+from . import exc
+
 log = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
 
@@ -43,10 +45,14 @@ class DTProxy:
 
     def get(self, uuid, fields=None):
         dpath = f"{self.path}/{uuid}"
-        ret = self.client._invoke_("get", dpath, paginated=False, ignore_status=(404,))
+        ret = self.client._invoke_(
+            "get",
+            dpath,
+            paginated=False,
+        )
         if ret.status_code == 404:
             log.info(f"Could not find {ret.url}")
-            return None
+            raise exc.NotFound(ret.url)
         data = ret.json()
 
         clz = DTProxy
@@ -57,13 +63,16 @@ class DTProxy:
         )
 
     def list(self, fields=None, **kwargs):
-        ret = self.client._invoke_(
-            "get", f"{self.path}", qp=kwargs, ignore_status=(404,)
-        )
-        log.debug(f"Retrieved items from {ret.url} {ret.content}")
-        if ret.status_code == 404:
+        try:
+            ret = self.client._invoke_(
+                "get",
+                f"{self.path}",
+                qp=kwargs,
+            )
+            log.debug(f"Retrieved items from {ret.url} {ret.content}")
+        except exc.NotFound:
             log.info(f"Could not find {ret.url}")
-            return None
+            return []
         data = ret.json()
         return fields_filter(data, fields=fields)
 
@@ -83,7 +92,7 @@ class DTProxy:
 
     def upload(self, bom_payload):
         if not self.path.endswith("bom"):
-            raise ValueError("Can only upload boms")
+            raise exc.BadRequest("Can only upload boms")
         ret = self.client._invoke_("put", f"{self.path}", json=bom_payload)
         return ret.json()
 
@@ -105,14 +114,14 @@ class DTProxy:
 
         ret = self.client._invoke_("delete", dpath)
         if ret.status_code != 204:
-            raise ValueError(f"Could not delete {uuid} {ret.status_code} {ret.content}")
+            raise exc.BaseDTException(
+                f"Could not delete {uuid} {ret.status_code} {ret.content}"
+            )
         return None
 
     def lookup(self, *args, **kwargs):
+        """Lookup a single project by name or uuid."""
         ret = self.client._invoke_("get", f"{self.path}/lookup", *args, **kwargs)
-        if ret.status_code == 404:
-            log.info(f"Could not find {ret.url}")
-            return None
         return ret.json()
 
     def __getitem__(self, key):
@@ -185,7 +194,6 @@ class DependencyTrack:
         fields=None,
         qp: dict = None,
         paginated=True,
-        ignore_status=tuple(),
         **kwargs,
     ):
         qp = qp or {}
@@ -196,8 +204,26 @@ class DependencyTrack:
             url += f"?{urlencode(qp, doseq=True)}"
         ret = self.session.request(method, url, **kwargs)
 
-        if ret.status_code >= 400 and ret.status_code not in ignore_status:
-            raise ValueError(f"{ret.status_code} {ret.content}")
+        if ret.status_code == 404:
+            raise exc.NotFound(
+                status=ret.status_code,
+                detail=ret.content,
+                instance=ret.request.url,
+                response=ret,
+            )
+        if ret.status_code == 409:
+            raise exc.Conflict(
+                status=ret.status_code, detail=ret.content, instance=ret.request.url
+            )
+        if 400 <= ret.status_code < 500:
+            raise exc.BadRequest(status=ret.status_code, detail=ret.content)
+        if 500 <= ret.status_code < 600:
+            raise exc.InternalServerError(
+                status=ret.status_code,
+                detail=ret.content,
+                instance=ret.request.url,
+                response=ret,
+            )
         return ret
 
     @staticmethod
